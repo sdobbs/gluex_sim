@@ -6,7 +6,8 @@ import sbms
 Import('*')
 env = env.Clone()
 
-sbms.AddHDDM(env)
+sbms.AddROOT(env)
+sbms.AddRCDB(env)
+sbms.AddDANA(env)
 sbms.executable(env)
-
 
