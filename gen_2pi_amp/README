@@ -11,6 +11,14 @@ gen_2pi_amp> mv twopi_fitPars.txt twopi_amp_fitPars.fit2
 gen_2pi_amp> root -l
 root [0] .x twopi_amp.C
 
+# Here are instructions for processing MC smeared output files / or data
 
+gen_2pi_amp> hd_root -PPLUGINS=monitoring_hists,p2pi_trees -PNTHREADS=12 ../hddm/dana_rest_gen_2pi_amp_pulls3_030000_00*.hddm -o hd_root_gen_2pi_amp_pulls3_030000.root
+gen_2pi_amp> mv tree_p2pi_trees.root tree_hd_root_gen_2pi_amp_pulls3_030000.root
+gen_2pi_amp> root -l -b tree_hd_root_gen_2pi_amp_pulls3_030000.root
+root [0] .x $ROOT_ANALYSIS_HOME/scripts/Load_DSelector.C
+root [0] p2pi_trees_Tree->Process("DSelector_p2pi_trees.C+");
 
-hd_root -PPLUGINS=monitoring_hists,p2pi_trees -PNTHREADS=12 ../hddm/dana_rest_gen_2pi_primakoff_030000_*.hddm -o p2pi_trees_030000.root_030000.root
+gen_2pi_amp> root -l
+root [0].x plot_p2pi_trees.C
+
