@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <fstream>
 #include <complex>
@@ -14,11 +13,11 @@
 #include "AMPTOOLS_DATAIO/ROOTDataWriter.h"
 #include "AMPTOOLS_DATAIO/HDDMDataWriter.h"
 
-#include "AMPTOOLS_AMPS/TwoPiAngles_primakoff.h"
-#include "AMPTOOLS_AMPS/TwoPiWt_primakoff.h"
+#include "AMPTOOLS_AMPS/TwoPSHelicity.h"
+#include "AMPTOOLS_AMPS/BreitWigner.h"
 
 #include "AMPTOOLS_MCGEN/ProductionMechanism.h"
-#include "AMPTOOLS_MCGEN/GammaZToXYZ.h"
+#include "AMPTOOLS_MCGEN/GammaPToXYP.h"
 
 #include "IUAmpTools/AmpToolsInterface.h"
 #include "IUAmpTools/ConfigFileParser.h"
@@ -43,10 +42,8 @@ int main( int argc, char* argv[] ){
 	bool genFlat = false;
 	
 	// default upper and lower bounds 
-	// double lowMass = 0.2;
-	// double highMass = 2.0; 
-	double lowMass = 0.28;
-	double highMass = 0.58 ;
+	double lowMass = 0.2;
+	double highMass = 2.0;
 	
 	double beamMaxE   = 12.0;
 	double beamPeakE  = 9.0;
@@ -55,6 +52,8 @@ int main( int argc, char* argv[] ){
 	
 	int runNum = 9001;
 	int seed = 0;
+
+	double slope = 6.0;
 
 	int nEvents = 10000;
 	int batchSize = 10000;
@@ -100,6 +99,9 @@ int main( int argc, char* argv[] ){
 		if (arg == "-s"){
                         if ((i+1 == argc) || (argv[i+1][0] == '-')) arg = "-h";
                         else  seed = atoi( argv[++i] ); }
+		if (arg == "-t"){
+                        if ((i+1 == argc) || (argv[i+1][0] == '-')) arg = "-h";
+                        else  slope = atof( argv[++i] ); }
 		if (arg == "-d"){
 			diag = true; }
 		if (arg == "-f"){
@@ -118,6 +120,7 @@ int main( int argc, char* argv[] ){
                         cout << "\t -b  <value>\t Maximum photon energy to simulate events [optional]" << endl;
 			cout << "\t -r  <value>\t Run number assigned to generated events [optional]" << endl;
 			cout << "\t -s  <value>\t Random number seed initialization [optional]" << endl;
+			cout << "\t -t  <value>\t Momentum transfer slope [optional]" << endl;
 			cout << "\t -f \t\t Generate flat in M(X) (no physics) [optional]" << endl;
 			cout << "\t -d \t\t Plot only diagnostic histograms [optional]" << endl << endl;
 			exit(1);
@@ -125,7 +128,7 @@ int main( int argc, char* argv[] ){
 	}
 	
 	if( configfile.size() == 0 || outname.size() == 0 ){
-		cout << "No config file or output specificed:  run gen_2pi_primakoff -h for help" << endl;
+		cout << "No config file or output specificed:  run gen_2pi -h for help" << endl;
 		exit(1);
 	}
 	
@@ -136,20 +139,21 @@ int main( int argc, char* argv[] ){
 	ReactionInfo* reaction = cfgInfo->reactionList()[0];
 	
 	// random number initialization (set to 0 by default)
+	TRandom3* gRandom = new TRandom3();
 	gRandom->SetSeed(seed);
 
 	// setup AmpToolsInterface
-	AmpToolsInterface::registerAmplitude( TwoPiAngles_primakoff() );
-	AmpToolsInterface::registerAmplitude( TwoPiWt_primakoff() );
+	AmpToolsInterface::registerAmplitude( TwoPSHelicity() );
+	AmpToolsInterface::registerAmplitude( BreitWigner() );
 	AmpToolsInterface ati( cfgInfo, AmpToolsInterface::kMCGeneration );
-	
+
 	ProductionMechanism::Type type =
 		( genFlat ? ProductionMechanism::kFlat : ProductionMechanism::kResonant );
-	
+
 	// generate over a range of mass -- the daughters are two charged pions
-	GammaZToXYZ resProd( lowMass, highMass, 0.140, 0.140, beamMaxE, beamPeakE, beamLowE, beamHighE, type );
+	GammaPToXYP resProd( lowMass, highMass, ParticleMass(PiPlus), ParticleMass(PiMinus), beamMaxE, beamPeakE, beamLowE, beamHighE, type, slope );
 	
-	// seed the distribution with a sum of noninterfering s-wave amplitudes
+	// seed the distribution with a sum of noninterfering Breit-Wigners
 	// we can easily compute the PDF for this and divide by that when
 	// doing accept/reject -- improves efficiency if seeds are picked well
 	
@@ -159,13 +163,12 @@ int main( int argc, char* argv[] ){
 		// set of amplitudes -- doing so will improve efficiency.  Leaving as is
 		// won't make MC incorrect, it just won't be as fast as it could be
 		
-		// resProd.addResonance( 0.775, 0.146,  1.0 );
-		resProd.addResonance( 0.4, 0.146,  1.0 );    
+		resProd.addResonance( 0.775, 0.146,  1.0 );
 	}
 	
 	vector< int > pTypes;
 	pTypes.push_back( Gamma );
-	pTypes.push_back( Pb208 );     // use lead instead of Sn116 since it is defined in particle list.
+	pTypes.push_back( Proton );
 	pTypes.push_back( PiPlus );
 	pTypes.push_back( PiMinus );
 	
@@ -173,16 +176,18 @@ int main( int argc, char* argv[] ){
 	if( hddmname.size() != 0 ) hddmOut = new HDDMDataWriter( hddmname, runNum );
 	ROOTDataWriter rootOut( outname );
 	
-	TFile* diagOut = new TFile( "gen_2pi_primakoff_diagnostic.root", "recreate" );
+	TFile* diagOut = new TFile( "gen_2pi_diagnostic.root", "recreate" );
 	
 	TH1F* mass = new TH1F( "M", "Resonance Mass", 180, lowMass, highMass );
 	TH1F* massW = new TH1F( "M_W", "Weighted Resonance Mass", 180, lowMass, highMass );
 	massW->Sumw2();
-	TH1D* intenW = new TH1D( "intenW", "True PDF / Gen. PDF", 1000, 0, 100 );
-	intenW->SetCanExtend(TH1::kXaxis);
-	TH2D* intenWVsM = new TH2D( "intenWVsM", "Ratio vs. M", 100, lowMass, highMass, 1000, 0, 10 );
-	intenWVsM->SetCanExtend(TH2::kYaxis);
-	TH2F* CosTheta_psi = new TH2F( "CosTheta_psi", "cos#theta vs. #psi", 180, -3.14, 3.14, 100, -1, 1);
+	TH1F* intenW = new TH1F( "intenW", "True PDF / Gen. PDF", 1000, 0, 100 );
+	TH2F* intenWVsM = new TH2F( "intenWVsM", "Ratio vs. M", 100, lowMass, highMass, 1000, 0, 10 );
+	
+	TH1F* t = new TH1F( "t", "-t Distribution", 200, 0, 1 );
+	
+	TH2F* M_CosTheta = new TH2F( "M_CosTheta", "M vs. cos#vartheta", 100, lowMass, highMass, 100, -1, 1);
+	TH2F* M_Phi = new TH2F( "M_Phi", "M vs. #varphi", 100, lowMass, highMass, 180, -3.14, 3.14);
 	
 	int eventCounter = 0;
 	while( eventCounter < nEvents ){
@@ -219,10 +224,8 @@ int main( int argc, char* argv[] ){
 			double genWeight = evt->weight();
 			
 			// cannot ask for the intensity if we haven't called process events above
-			// double ResM = resonance.M();
-		        // double intensity_i = ati.intensity( i );
 			double weightedInten = ( genFlat ? 1 : ati.intensity( i ) ); 
-			// cout << " i=" << i << "  intensity_i=" << intensity_i << " maxInten=" << maxInten << " ResM=" << ResM << endl;
+			// cout << " i=" << i << "  intensity_i=" << weightedInten << endl;
 
 			if( !diag ){
 				
@@ -241,51 +244,34 @@ int main( int argc, char* argv[] ){
 					TLorentzVector beam = evt->particle ( 0 );
 					TLorentzVector recoil = evt->particle ( 1 );
 					TLorentzVector p1 = evt->particle ( 2 );
+					TLorentzVector target(0,0,0,recoil[3]);
+
+					t->Fill(-1*(evt->particle(1)-target).M2());
 			
 					TLorentzRotation resonanceBoost( -resonance.BoostVector() );
 					
 					TLorentzVector beam_res = resonanceBoost * beam;
 					TLorentzVector recoil_res = resonanceBoost * recoil;
 					TLorentzVector p1_res = resonanceBoost * p1;
+					
+					// helicity frame: z-axis is propagation of resonance X => opposite recoil proton in X rest frame
+					TVector3 z = -1. * recoil_res.Vect().Unit();
+					
+					// y axis perpendicular to production plane
+					TVector3 y = beam_res.Vect().Cross(z).Unit();
+					
+					TVector3 x = y.Cross(z);
 
-                                        double phipol=0;     // need to get this angle from configuration file.
-                                        TVector3 eps(cos(phipol), sin(phipol), 0.0); // beam polarization vector in lab
-	
-					// production plane is defined by the pi+ (neglect recoil)
-					TVector3 zlab(0.,0.,1.0);     // z axis in lab
-					TVector3 y = (p1.Vect().Cross(zlab)).Unit();    // perpendicular to decay plane. ensure that y is perpendicular to z
-					TVector3 eps_perp = eps.Cross(zlab).Unit();         // perpendicular to plane defined by eps
-					GDouble Phi_pip = atan2(y.Dot(eps),y.Dot(eps_perp));  // use this calculation to preserve sign of angle
-					// Phi_pip = Phi_pip > 0? Phi_pip : Phi_pip + 3.14159;                     // make angle between eps and decay plane a positive number. This is psi of vector-meson production in forward kinematics.
-					// redefine to normal to the production plane
-                                        y = (beam.Vect().Unit().Cross(-recoil.Vect().Unit())).Unit();
-
-                                        // choose helicity frame: z-axis opposite recoil in rho rest frame
-                                        TVector3 z = -1. * recoil_res.Vect().Unit();
-                                        TVector3 x = y.Cross(z).Unit();
                                         TVector3 angles( (p1_res.Vect()).Dot(x),
                                                          (p1_res.Vect()).Dot(y),
                                                          (p1_res.Vect()).Dot(z) );
 
                                         double cosTheta = angles.CosTheta();
-                                        // double phi = angles.Phi();
+                                        double phi = angles.Phi();
 
-					// GDouble Phi_prod = atan2(y.Dot(eps), beam.Vect().Unit().Dot(eps.Cross(y)));
-					// Phi_prod = Phi_prod > 0? Phi_prod : Phi_prod + 3.14159;
-					// GDouble Phi = Phi_prod;              // retain angle between hadronic plane and polarization, although random for Primakoff
-                                        GDouble psi = Phi_pip;               // in the limit of forward scattering (Primakoff), Phi_pip is the angle between pip and the polarization
-                                        if(psi < -1*PI) psi += 2*PI;
-                                        if(psi > PI) psi -= 2*PI;
+					M_CosTheta->Fill( resonance.M(), cosTheta);
+					M_Phi->Fill( resonance.M(), phi);
 
-					/*cout << endl << " gen_2pi_primakoff " << endl;
-					cout << " p1="; p1.Vect().Print();
-					cout << " p1_res="; p1_res.Vect().Print();
-                                        cout << " Phi=" << Phi << endl;
-					cout << " phi= " << phi << endl;
-					cout << " psi=" << psi << endl;*/
-					
-					CosTheta_psi->Fill( psi, cosTheta);
-					
 					// we want to save events with weight 1
 					evt->setWeight( 1.0 );
 					
@@ -316,7 +302,9 @@ int main( int argc, char* argv[] ){
 	massW->Write();
 	intenW->Write();
 	intenWVsM->Write();
-	CosTheta_psi->Write();
+	t->Write();
+	M_CosTheta->Write();
+	M_Phi->Write();
 	diagOut->Close();
 	
 	if( hddmOut ) delete hddmOut;
